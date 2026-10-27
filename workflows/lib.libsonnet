@@ -47,12 +47,6 @@
     sensitive_volumes: ['ScoringPlane'],
   },
 
-  mygeomodel_geometry:: {
-    cpp: 'geometry_geomodel_provider',
-    db_file: '/vols/ship/masmith/stack/geometry/my_ship_geometry.db',
-    sensitive_volumes: ['ScoringPlane'],
-  },
-
   // The generator sources follow the same seeding convention as the geant4
   // module below: without a `seed`, each run draws a random one (logged at
   // startup, so a run can be reproduced after the fact). Merge one in for
