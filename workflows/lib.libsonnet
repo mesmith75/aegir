@@ -29,6 +29,15 @@
     magnets: magnets,
   },
 
+  // Magnets, maps and their placements from a placement manifest (field_service
+  // docs/placements_format.md). The default is the SHiP muon shield and
+  // spectrometer manifest that ship-field-maps installs under
+  // $SHIPFIELD_ROOT/share/field/.
+  field_placements(manifest='placements.json'):: {
+    cpp: 'field_map_provider',
+    placements: manifest,
+  },
+
   // 0.5 T constant By over the whole World volume — the field-smoke setup.
   world_field_05T_y:: self.field_map([
     {
@@ -44,12 +53,6 @@
   geomodel_geometry:: {
     cpp: 'geometry_geomodel_provider',
     db_file: 'ship_geometry.db',
-    sensitive_volumes: ['ScoringPlane'],
-  },
-
-  mygeomodel_geometry:: {
-    cpp: 'geometry_geomodel_provider',
-    db_file: '/vols/ship/masmith/stack/geometry/my_ship_geometry.db',
     sensitive_volumes: ['ScoringPlane'],
   },
 
