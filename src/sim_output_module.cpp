@@ -197,7 +197,12 @@ class FileSummary {
                                      : boost::json::value(nullptr)},
           {"n_events_processed", total_processed_.load()},
           {"n_events_written", total_written_.load()},
-          {"max_event_number_saved", max_event_number_.load()},
+          // null when nothing was written, like n_events_requested's
+          // "unknown", rather than a -1 readers would have to special-case.
+          {"max_event_number_saved",
+           total_written_.load() > 0
+               ? boost::json::value(max_event_number_.load())
+               : boost::json::value(nullptr)},
       };
 
       auto file = RFile::Update(filename_);
@@ -265,6 +270,20 @@ class MCRNTupleWriter {
 
   ~MCRNTupleWriter() {
     pool_.reset();
+    // Commit explicitly: ~RNTupleParallelWriter catches a failing
+    // CommitDataset() and only logs it, which would leave a file_summary
+    // claiming every event was written to an RNTuple that never committed.
+    try {
+      writer_->CommitDataset();
+    } catch (std::exception const& e) {
+      summary_.mark_write_failed();
+      try {
+        spdlog::error("sim_output_module: commit failed: {}", e.what());
+      } catch (...) {
+      }
+    } catch (...) {
+      summary_.mark_write_failed();
+    }
     writer_.reset();
     summary_.write();
   }
@@ -294,9 +313,9 @@ class MCRNTupleWriter {
   }
 
  private:
-  // Member order matters: the pool (holding all fill contexts) must be
-  // destroyed before the writer, which commits the dataset in its destructor
-  // ("all fill contexts must be destroyed before CommitDataset() is called").
+  // The pool (holding all fill contexts) must be destroyed before the dataset
+  // is committed ("all fill contexts must be destroyed before CommitDataset()
+  // is called"); the destructor resets it first, then commits explicitly.
   std::unique_ptr<RNTupleParallelWriter> writer_;
   std::optional<FillStatePool> pool_;
   FileSummary summary_;
@@ -336,6 +355,20 @@ class SimRNTupleWriter {
 
   ~SimRNTupleWriter() {
     pool_.reset();
+    // Commit explicitly: ~RNTupleParallelWriter catches a failing
+    // CommitDataset() and only logs it, which would leave a file_summary
+    // claiming every event was written to an RNTuple that never committed.
+    try {
+      writer_->CommitDataset();
+    } catch (std::exception const& e) {
+      summary_.mark_write_failed();
+      try {
+        spdlog::error("sim_output_module: commit failed: {}", e.what());
+      } catch (...) {
+      }
+    } catch (...) {
+      summary_.mark_write_failed();
+    }
     writer_.reset();
     summary_.write();
   }
@@ -382,9 +415,9 @@ class SimRNTupleWriter {
 
  private:
   bool filter_empty_;
-  // Member order matters: the pool (holding all fill contexts) must be
-  // destroyed before the writer, which commits the dataset in its destructor
-  // ("all fill contexts must be destroyed before CommitDataset() is called").
+  // The pool (holding all fill contexts) must be destroyed before the dataset
+  // is committed ("all fill contexts must be destroyed before CommitDataset()
+  // is called"); the destructor resets it first, then commits explicitly.
   std::unique_ptr<RNTupleParallelWriter> writer_;
   std::optional<FillStatePool> pool_;
   FileSummary summary_;
@@ -684,7 +717,7 @@ PHLEX_REGISTER_ALGORITHMS(m, config) {
   // module only its own block, so the workflow passes the total on here.
   std::optional<std::uint64_t> n_requested;
   if (auto const n = config.get_if_present<int>("n_events_requested")) {
-    if (*n <= 0) {
+    if (*n < 0) {
       throw std::runtime_error(
           "sim_output_module: n_events_requested must be positive");
     }
