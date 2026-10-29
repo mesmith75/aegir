@@ -191,4 +191,14 @@
     histo_file: histo_file,
     [if events != null then 'n_events_requested']: events,
   },
+
+  // The job's event total, given once: the driver and the output's
+  // file_summary n_events_requested both come from it, so they can't drift.
+  //   local job = lib.events(N);
+  //   { driver: job.driver, modules: { output: job.full_output(f, h) } }
+  events(n):: {
+    driver:: $.driver(n),
+    full_output(rntuple_file, histo_file):: $.full_output(rntuple_file, histo_file, n),
+    mc_only_output(rntuple_file, histo_file):: $.mc_only_output(rntuple_file, histo_file, n),
+  },
 }
