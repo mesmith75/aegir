@@ -135,6 +135,17 @@ class FillStatePool {
 
   Lease acquire() { return Lease{*this}; }
 
+  // Flushes and drops every context. Destructing a context flushes it too,
+  // but ROOT only logs a failure there, so the writer flushes through here to
+  // see it. Call once all leases are back.
+  void close() {
+    std::unique_ptr<FillState> state;
+    while (states_.try_pop(state)) {
+      state->ctx->FlushCluster();
+      state.reset();
+    }
+  }
+
  private:
   tbb::concurrent_bounded_queue<std::unique_ptr<FillState>> states_;
 };
@@ -208,6 +219,7 @@ class FileSummary {
       auto file = RFile::Update(filename_);
       TObjString const json{boost::json::serialize(summary).c_str()};
       file->Put("file_summary", json);
+      file->Close();
       spdlog::info("sim_output_module: wrote file_summary to '{}'", filename_);
     } catch (std::exception const& e) {
       try {
@@ -242,6 +254,35 @@ double pdg_bin(std::int32_t pdg) {
   return pdg;
 }
 
+// Flushes, commits and closes the RNTuple, then adds the file_summary. A
+// failure in any step leaves the file without a summary. RNTuple's own
+// destructors would only log these failures, so each step is run here first.
+void finish_file(std::optional<FillStatePool>& pool,
+                 std::unique_ptr<RNTupleParallelWriter>& writer,
+                 FileSummary& summary) noexcept {
+  auto const attempt = [&summary](auto&& step) {
+    try {
+      step();
+    } catch (std::exception const& e) {
+      summary.mark_write_failed();
+      try {
+        spdlog::error("sim_output_module: closing output failed: {}", e.what());
+      } catch (...) {
+      }
+    } catch (...) {
+      summary.mark_write_failed();
+    }
+  };
+
+  attempt([&pool] { pool->close(); });
+  // Unconditional: contexts must not outlive the writer, even after a failed
+  // flush, and all must be gone before CommitDataset().
+  pool.reset();
+  attempt([&writer] { writer->CommitDataset(); });
+  writer.reset();
+  summary.write();
+}
+
 // RNTuple writer for MC particles only (used when no G4 simulation)
 class MCRNTupleWriter {
  public:
@@ -268,25 +309,7 @@ class MCRNTupleWriter {
         filename, n_contexts, cluster_mib);
   }
 
-  ~MCRNTupleWriter() {
-    pool_.reset();
-    // Commit explicitly: ~RNTupleParallelWriter catches a failing
-    // CommitDataset() and only logs it, which would leave a file_summary
-    // claiming every event was written to an RNTuple that never committed.
-    try {
-      writer_->CommitDataset();
-    } catch (std::exception const& e) {
-      summary_.mark_write_failed();
-      try {
-        spdlog::error("sim_output_module: commit failed: {}", e.what());
-      } catch (...) {
-      }
-    } catch (...) {
-      summary_.mark_write_failed();
-    }
-    writer_.reset();
-    summary_.write();
-  }
+  ~MCRNTupleWriter() { finish_file(pool_, writer_, summary_); }
 
   void write(phlex::handle<std::vector<SHiP::MCParticle>> particles,
              SHiP::EventHeader const& header) {
@@ -353,25 +376,7 @@ class SimRNTupleWriter {
         filename, n_contexts, cluster_mib);
   }
 
-  ~SimRNTupleWriter() {
-    pool_.reset();
-    // Commit explicitly: ~RNTupleParallelWriter catches a failing
-    // CommitDataset() and only logs it, which would leave a file_summary
-    // claiming every event was written to an RNTuple that never committed.
-    try {
-      writer_->CommitDataset();
-    } catch (std::exception const& e) {
-      summary_.mark_write_failed();
-      try {
-        spdlog::error("sim_output_module: commit failed: {}", e.what());
-      } catch (...) {
-      }
-    } catch (...) {
-      summary_.mark_write_failed();
-    }
-    writer_.reset();
-    summary_.write();
-  }
+  ~SimRNTupleWriter() { finish_file(pool_, writer_, summary_); }
 
   void write(phlex::handle<std::vector<SHiP::MCParticle>> particles,
              SHiP::SimResult const& result,
@@ -715,14 +720,16 @@ PHLEX_REGISTER_ALGORITHMS(m, config) {
   // The driver's event total, recorded in the file_summary so readers can
   // tell a complete file from one whose job stopped early. phlex gives a
   // module only its own block, so the workflow passes the total on here.
-  std::optional<std::uint64_t> n_requested;
-  if (auto const n = config.get_if_present<int>("n_events_requested")) {
-    if (*n < 0) {
-      throw std::runtime_error(
-          "sim_output_module: n_events_requested must be positive");
-    }
-    n_requested = static_cast<std::uint64_t>(*n);
-  }
+  // std::optional<std::uint64_t> n_requested;
+  // if (auto const n = config.get_if_present<int>("n_events_requested")) {
+  //  if (*n < 0) {
+  //    throw std::runtime_error(
+  //        "sim_output_module: n_events_requested must be positive");
+  //  }
+  //  n_requested = static_cast<std::uint64_t>(*n);
+  //}
+  auto const n_requested =
+      config.get_if_present<std::uint64_t>("n_events_requested");
 
   if (mode == "noop") {
     auto const noop = m.make<MCNoop>();

@@ -45,5 +45,7 @@ phlex -j 8 -c <(jsonnet -J "$workflows" \
 
 count=$(python3 "$here/count_entries.py" "$workdir/out.root")
 [ "$count" = "$n" ] || { echo "writer_pool: expected $n events, got $count"; exit 1; }
+python3 "$here/check_file_summary.py" "$workdir/out.root" \
+  mc_only false "$n" "$n" "$n" $((n - 1))
 
 echo "writer pool passed: $n events written through 2 pooled fill contexts"
