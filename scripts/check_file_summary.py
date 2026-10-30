@@ -52,8 +52,7 @@ def check(
         "max_event_number_saved": max_event_number,
     }
     return [
-        f"file_summary {key}: got {summary.get(key, '<missing>')!r}, "
-        f"expected {value!r}"
+        f"file_summary {key}: got {summary.get(key, '<missing>')!r}, expected {value!r}"
         for key, value in want.items()
         if key not in summary or summary[key] != value
     ]
@@ -79,8 +78,7 @@ def check_incomplete(path, n_requested):
     written = summary.get("n_events_written")
     if written != processed:
         errors.append(
-            f"file_summary n_events_written: got {written!r}, "
-            f"expected {processed!r}"
+            f"file_summary n_events_written: got {written!r}, expected {processed!r}"
         )
     return errors
 
