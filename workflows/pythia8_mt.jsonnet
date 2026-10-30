@@ -13,7 +13,7 @@ function(seed=null, events=100) {
     pythia8: lib.pythia8 {
       parallel: true,
       num_threads: 4,
-      num_events: 100,
+      num_events: events,
       [if seed != null then 'seed']: seed,
     },
   },

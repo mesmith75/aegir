@@ -36,7 +36,7 @@ find_package(
 )
 find_package(Geant4 REQUIRED)
 
-find_package(Boost COMPONENTS json)
+find_package(Boost REQUIRED COMPONENTS json)
 
 # Pythia8 has no CMake config; create an imported target from pythia8-config
 find_program(PYTHIA8_CONFIG pythia8-config REQUIRED)
